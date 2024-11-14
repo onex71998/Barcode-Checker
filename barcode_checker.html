@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barcode Checker with Counters</title>
+  <style>
+    /* CSS styling */
+    * { box-sizing: border-box; }
+    body { 
+      font-family: Arial, sans-serif; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      margin: 0; 
+      background-color: #f0f4f8; 
+      transition: background-color 0.5s; 
+    }
+    .container { 
+      width: 100%; 
+      max-width: 500px; 
+      background-color: #fff; 
+      padding: 30px; 
+      border-radius: 10px; 
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); 
+      text-align: center; 
+    }
+    h1 { font-size: 1.8rem; color: #333; margin-bottom: 20px; }
+    .input-group { margin-bottom: 25px; }
+    .input-group label { display: block; margin-bottom: 8px; font-size: 1.1rem; font-weight: bold; color: #555; }
+    .input-group input { width: 100%; padding: 12px; font-size: 1.1rem; border: 2px solid #ddd; border-radius: 5px; transition: border-color 0.3s; }
+    .input-group input:focus { border-color: #007bff; outline: none; }
+    .status { font-size: 1.3rem; padding: 12px; margin-top: 10px; border-radius: 5px; display: inline-block; width: 100%; color: #fff; transition: background-color 0.3s; }
+    .correct { background-color: #4CAF50; }
+    .incorrect { background-color: #F44336; }
+    .info { background-color: #007bff; }
+    .buttons { display: flex; justify-content: space-between; margin-top: 15px; }
+    .buttons button { flex: 1; margin: 5px; padding: 12px; font-size: 1.1rem; border: none; border-radius: 5px; cursor: pointer; color: #fff; transition: background-color 0.3s; }
+    .set-btn { background-color: #007bff; }
+    .reset-btn { background-color: #6c757d; }
+    .set-btn:hover { background-color: #0056b3; }
+    .reset-btn:hover { background-color: #5a6268; }
+    .counter-group { margin-top: 25px; text-align: left; font-weight: bold; color: #333; }
+    .counter { background-color: #f7f9fc; border: 1px solid #d1d3e2; border-radius: 5px; padding: 12px; display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+    .counter label { margin: 0; font-size: 1.3rem; }
+    .counter span { font-size: 1.5rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Barcode Checker with Counters</h1>
+    
+    <!-- Lot Number Input -->
+    <div class="input-group">
+      <label for="lotNumberInput">Enter Lot Number:</label>
+      <input type="text" id="lotNumberInput" placeholder="Enter lot number">
+    </div>
+
+    <!-- Master Barcode Input -->
+    <div class="input-group">
+      <label for="masterBarcodeInput">Enter Master Barcode:</label>
+      <input type="text" id="masterBarcodeInput" placeholder="Scan or enter master barcode">
+    </div>
+    
+    <!-- Product Barcode Input -->
+    <div class="input-group">
+      <label for="productBarcodeInput">Scan Product Barcode:</label>
+      <input type="text" id="productBarcodeInput" placeholder="Scan product barcode" disabled>
+    </div>
+    
+    <!-- Status Message -->
+    <p id="status" class="status info">Please enter the master barcode first.</p>
+    
+    <!-- Set and Reset Buttons -->
+    <div class="buttons">
+      <button class="set-btn">Set Master Barcode</button>
+      <button class="reset-btn">Reset</button>
+    </div>
+
+    <!-- Counter Display -->
+    <div class="counter-group">
+      <div class="counter">
+        <label>Product Quantity:</label>
+        <span id="productQty">0</span>
+      </div>
+      <div class="counter">
+        <label>Carton Quantity:</label>
+        <span id="cartonQty">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Elements for Alert Sounds -->
+  <audio id="correctSound" src="correct.mp3" preload="auto"></audio>
+  <audio id="incorrectSound" src="incorrect.mp3" preload="auto"></audio>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyD4DzkrLmNugQL94qZxOVHZ8-U4S1vHykI",
+        authDomain: "barcode-checker-b9ef7.firebaseapp.com",
+        databaseURL: "https://barcode-checker-b9ef7-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "barcode-checker-b9ef7",
+        storageBucket: "barcode-checker-b9ef7.firebasestorage.app",
+        messagingSenderId: "421805716962",
+        appId: "1:421805716962:web:f91095aab0d6f164ea35bb",
+        measurementId: "G-VR5H24ERWW"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const lotNumberInput = document.getElementById("lotNumberInput");
+    const masterBarcodeInput = document.getElementById("masterBarcodeInput");
+    const productBarcodeInput = document.getElementById("productBarcodeInput");
+    const productQtyDisplay = document.getElementById("productQty");
+    const cartonQtyDisplay = document.getElementById("cartonQty");
+    const status = document.getElementById("status");
+    const correctSound = document.getElementById("correctSound");
+    const incorrectSound = document.getElementById("incorrectSound");
+
+    let productQty = 0;
+    let cartonQty = 0;
+    let storedMasterBarcode = "";
+
+    function loadDataForLot() {
+        const lotNumber = lotNumberInput.value.trim();
+        if (lotNumber) {
+            const lotRef = ref(db, `lots/${lotNumber}`);
+            get(lotRef).then(snapshot => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    storedMasterBarcode = data.masterBarcode || "";  // Store the master barcode from the database
+                    masterBarcodeInput.value = storedMasterBarcode;
+                    productQty = data.productQty || 0;
+                    cartonQty = Math.floor(productQty / 25);
+
+                    productQtyDisplay.innerText = productQty;
+                    cartonQtyDisplay.innerText = cartonQty;
+                    productBarcodeInput.disabled = false;
+                    status.innerText = "Master Barcode loaded successfully.";
+                    status.className = "status info";
+                } else {
+                    resetFields();
+                    status.innerText = "New Lot Number. Please set a Master Barcode.";
+                    status.className = "status info";
+                }
+            });
+        }
+    }
+
+    lotNumberInput.addEventListener("change", loadDataForLot);
+
+    function setMasterBarcode() {
+        const lotNumber = lotNumberInput.value.trim();
+        if (!lotNumber) {
+            alert("Please enter a Lot Number first.");
+            return;
+        }
+
+        const masterBarcode = masterBarcodeInput.value.trim();
+        if (masterBarcode) {
+            const lotRef = ref(db, `lots/${lotNumber}`);
+            set(lotRef, { masterBarcode, productQty, cartonQty });
+            storedMasterBarcode = masterBarcode;  // Update the stored master barcode variable
+            productBarcodeInput.disabled = false;
+            status.innerText = "Master Barcode set successfully.";
+            status.className = "status info";
+        }
+    }
+
+    function resetFields() {
+        masterBarcodeInput.value = "";
+        productQty = 0;
+        cartonQty = 0;
+        productQtyDisplay.innerText = productQty;
+        cartonQtyDisplay.innerText = cartonQty;
+        productBarcodeInput.value = "";
+        productBarcodeInput.disabled = true;
+        status.innerText = "Please enter the master barcode first.";
+        status.className = "status info";
+    }
+
+    function resetMasterBarcode() {
+        const lotNumber = lotNumberInput.value.trim();
+        if (lotNumber) {
+            const lotRef = ref(db, `lots/${lotNumber}`);
+            set(lotRef, { masterBarcode: "", productQty: 0, cartonQty: 0 });
+            resetFields();
+            status.innerText = "Master Barcode reset.";
+            status.className = "status info";
+        } else {
+            alert("Please enter a valid Lot Number.");
+        }
+    }
+
+    // Make functions accessible in the global scope
+    window.setMasterBarcode = setMasterBarcode;
+    window.resetMasterBarcode = resetMasterBarcode;
+
+    // Event listeners for buttons
+    document.querySelector(".set-btn").addEventListener("click", setMasterBarcode);
+    document.querySelector(".reset-btn").addEventListener("click", resetMasterBarcode);
+
+
+    productBarcodeInput.addEventListener("change", () => {
+        const scannedBarcode = productBarcodeInput.value.trim();
+        if (scannedBarcode) {
+            if (scannedBarcode === storedMasterBarcode) {
+                productQty++;
+                cartonQty = Math.floor(productQty / 25);
+                productQtyDisplay.innerText = productQty;
+                cartonQtyDisplay.innerText = cartonQty;
+
+                // Update Firebase with the new quantities
+                const lotNumber = lotNumberInput.value.trim();
+                if (lotNumber) {
+                    const lotRef = ref(db, `lots/${lotNumber}`);
+                    set(lotRef, { masterBarcode: storedMasterBarcode, productQty, cartonQty });
+                }
+
+                correctSound.currentTime = 0; // Reset audio to the start
+                correctSound.play();
+                status.innerText = "Correct Barcode!";
+                status.className = "status correct";
+                document.body.style.backgroundColor = '#4CAF50';  // Set background to green
+                
+                // Reset background color after 1.5 seconds
+                setTimeout(() => {
+                    document.body.style.backgroundColor = '#f0f4f8';  // Reset to original color
+                }, 1500);
+
+            } else {
+                incorrectSound.currentTime = 0; // Reset audio to the start
+                incorrectSound.play();
+                status.innerText = "Incorrect Barcode!";
+                status.className = "status incorrect";
+                document.body.style.backgroundColor = '#F44336';  // Set background to red
+                
+                // Reset background color after 1.5 seconds
+                setTimeout(() => {
+                    document.body.style.backgroundColor = '#f0f4f8';  // Reset to original color
+                }, 1500);
+            }
+        }
+        productBarcodeInput.value = "";  // Clear the input after checking
+    });
+
+    // Load initial data for the current lot when the page loads
+    window.onload = () => {
+        loadDataForLot();
+    };
+</script>
+</body>
+</html>
